@@ -1,6 +1,7 @@
 import ujson
 import uos
 import uhashlib
+import utime
 from cryptolib import aes
 
 
@@ -24,6 +25,7 @@ class unosql:
         self.salt_file = f"{db_name}_salt.db"
         self.salt = self._load_salt() if encryption_key else None
         self.data = {}
+        self.counters = {}  
 
     def _load_salt(self):
         """Load or generate a unique salt for encryption."""
@@ -75,6 +77,20 @@ class unosql:
         padding_length = data[-1]
         return data[:-padding_length]
 
+    def _get_next_id(self, collection_name):
+        """
+        Generate the next unique ID for a collection.
+
+        :param collection_name: Name of the collection.
+        :return: Next unique ID.
+        """
+        if collection_name not in self.counters:
+           
+            self.counters[collection_name] = 1
+        else:
+            self.counters[collection_name] += 1
+        return self.counters[collection_name]
+
     def _load_data(self, collection_name):
         """Load data from a file."""
         file_name = f"{self.db_name}_{collection_name}.db"
@@ -100,13 +116,22 @@ class unosql:
 
     def insert(self, collection_name, record):
         """
-        Insert a record into a collection.
+        Insert a record into a collection with an automatic ID and timestamp.
 
         :param collection_name: Name of the collection.
         :param record: A dictionary representing the record to insert.
         """
         if not isinstance(record, dict):
             raise ValueError("Record must be a dictionary.")
+
+        
+        if "id" not in record:
+            record["id"] = self._get_next_id(collection_name)
+
+       
+        if "timestamp" not in record:
+            record["timestamp"] = utime.time()  
+
         if collection_name not in self.data:
             self.data[collection_name] = []
         self.data[collection_name].append(record)
@@ -183,7 +208,45 @@ class unosql:
         :return: Number of records in the collection.
         """
         return len(self.data.get(collection_name, []))
-    # Backup the database to a file
+
+    def get_last_n_records(self, collection_name, n):
+        """
+        Get the last 'n' records from a collection.
+
+        :param collection_name: Name of the collection.
+        :param n: Number of records to retrieve.
+        :return: List of the last 'n' records.
+        """
+        if collection_name not in self.data:
+            return []
+        return self.data[collection_name][-n:]
+
+    def get_records_in_timeframe(self, collection_name, time_key, start_time, end_time):
+        """
+        Get records within a specific timeframe.
+
+        :param collection_name: Name of the collection.
+        :param time_key: The key in the record that represents the timestamp.
+        :param start_time: Start of the timeframe.
+        :param end_time: End of the timeframe.
+        :return: List of records within the timeframe.
+        """
+        if collection_name not in self.data:
+            return []
+        return [record for record in self.data[collection_name] if start_time <= record.get(time_key, 0) <= end_time]
+
+    def get_first_n_records(self, collection_name, n):
+        """
+        Get the first 'n' records from a collection.
+
+        :param collection_name: Name of the collection.
+        :param n: Number of records to retrieve.
+        :return: List of the first 'n' records.
+        """
+        if collection_name not in self.data:
+            return []
+        return self.data[collection_name][:n]
+
     def backup(self, backup_file_name):
         """Backup the entire database."""
         collections = list(self.data.keys())  # Collect all active collections
@@ -196,7 +259,6 @@ class unosql:
                 with open(file_name, 'rb') as coll_file:
                     f.write(coll_file.read())  # Write raw content of each collection to the backup file
 
-    # Restore the database from a backup
     def restore(self, backup_file_name):
         """Restore the database from a backup file."""
         if not self._file_exists(backup_file_name):
@@ -214,8 +276,3 @@ class unosql:
 
         # Reload data from disk to memory
         self.data = {collection: self._load_data(collection) for collection in collections}
-
-
-
-
-
